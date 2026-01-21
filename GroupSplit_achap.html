@@ -1,0 +1,708 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Plus, 
+  Trash2, 
+  User, 
+  DollarSign, 
+  Save, 
+  Edit2, 
+  X, 
+  Check, 
+  Power,
+  Calculator,
+  Users,
+  PieChart,
+  Share2,
+  Globe,
+  History,
+  Clock,
+  ExternalLink,
+  Type
+} from 'lucide-react';
+
+// --- Constants & Translations ---
+const STORAGE_KEY = 'seisan_share_history_v1';
+
+const translations = {
+  ja: {
+    title: "わりかん君",
+    totalSpent: "合計支出",
+    shareLink: "共有リンクをコピー",
+    copied: "コピー完了！",
+    members: "メンバー管理",
+    addMember: "名前を入力...",
+    expenses: "経費入力",
+    addExpense: "経費を追加",
+    content: "内容",
+    amount: "金額",
+    payer: "支払った人",
+    weight: "比重",
+    balance: "各自の収支",
+    settlement: "精算アクション",
+    noExpenses: "経費がありません。「経費を追加」ボタンから入力を開始してください。",
+    settled: "すべての貸し借りが清算されています！",
+    payTo: "に支払う",
+    placeholderExpense: "例：ランチ代",
+    optimizeNote: "※送金回数が最小になるように計算されています",
+    lang: "日本語",
+    currency: "¥",
+    currencyPos: "prefix",
+    history: "作成履歴",
+    noHistory: "履歴はまだありません",
+    recentHistory: "最近の履歴 (最大10件)",
+    projectTitle: "タイトル",
+    defaultProjectTitle: "無題の精算"
+  },
+  en: {
+    title: "FairShare",
+    totalSpent: "Total Spent",
+    shareLink: "Copy Share Link",
+    copied: "Copied!",
+    members: "Members",
+    addMember: "Enter name...",
+    expenses: "Expenses",
+    addExpense: "Add Expense",
+    content: "Content",
+    amount: "Amount",
+    payer: "Payer",
+    weight: "Weight",
+    balance: "Balances",
+    settlement: "Settlement Plan",
+    noExpenses: "No expenses yet. Click 'Add Expense' to start.",
+    settled: "All settled up!",
+    payTo: "pays to",
+    placeholderExpense: "e.g. Lunch",
+    optimizeNote: "※Optimized to minimize transfers",
+    lang: "English",
+    currency: "$",
+    currencyPos: "prefix",
+    history: "History",
+    noHistory: "No history yet",
+    recentHistory: "Recent History (Max 10)",
+    projectTitle: "Title",
+    defaultProjectTitle: "Untitled Settlement"
+  },
+  zh_CN: {
+    title: "公平分账",
+    totalSpent: "总支出",
+    shareLink: "复制共享链接",
+    copied: "已复制！",
+    members: "成员管理",
+    addMember: "输入姓名...",
+    expenses: "费用输入",
+    addExpense: "添加费用",
+    content: "内容",
+    amount: "金额",
+    payer: "付款人",
+    weight: "权重",
+    balance: "个人收支",
+    settlement: "结算方案",
+    noExpenses: "暂无费用。点击“添加费用”开始。",
+    settled: "账目已结清！",
+    payTo: "应支付给",
+    placeholderExpense: "例如：午餐",
+    optimizeNote: "※已优化以减少转账次数",
+    lang: "简体中文",
+    currency: "¥",
+    currencyPos: "prefix",
+    history: "历史记录",
+    noHistory: "暂无历史",
+    recentHistory: "最近历史 (最多10条)",
+    projectTitle: "标题",
+    defaultProjectTitle: "未命名结算"
+  },
+  // ... (Other languages same structure)
+};
+
+// --- Utils ---
+
+const encodeState = (state) => {
+  try {
+    const jsonString = JSON.stringify(state);
+    const base64 = btoa(encodeURIComponent(jsonString));
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch (e) {
+    return null;
+  }
+};
+
+const decodeState = (hash) => {
+  try {
+    if (!hash || !hash.startsWith('#s=')) return null;
+    let base64 = hash.substring(3).replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) base64 += '=';
+    const jsonString = decodeURIComponent(atob(base64));
+    return JSON.parse(jsonString);
+  } catch (e) {
+    return null;
+  }
+};
+
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ${className}`}>
+    {children}
+  </div>
+);
+
+const Button = ({ onClick, variant = "primary", size = "md", icon: Icon, children, className = "" }) => {
+  const baseStyle = "flex items-center justify-center font-medium transition-colors rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-1";
+  const variants = {
+    primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500",
+    secondary: "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-400",
+    danger: "bg-red-50 text-red-600 hover:bg-red-100 focus:ring-red-500",
+    ghost: "bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700",
+    icon: "p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full"
+  };
+  const sizes = {
+    sm: "px-2 py-1 text-xs",
+    md: "px-4 py-2 text-sm",
+    lg: "px-6 py-3 text-base",
+    icon: "p-2"
+  };
+
+  return (
+    <button onClick={onClick} className={`${baseStyle} ${variants[variant]} ${variant === 'icon' ? '' : sizes[size]} ${className}`}>
+      {Icon && <Icon className={`w-4 h-4 ${children ? 'mr-2' : ''}`} />}
+      {children}
+    </button>
+  );
+};
+
+export default function FairShareApp() {
+  const [lang, setLang] = useState('ja');
+  const [projectTitle, setProjectTitle] = useState('');
+  const [members, setMembers] = useState([
+    { id: 'm1', name: '太郎' },
+    { id: 'm2', name: '花子' },
+    { id: 'm3', name: '一郎' }
+  ]);
+  const [expenses, setExpenses] = useState([
+    { id: 'e1', title: '食費', amount: 4500, payerId: 'm1', weights: { 'm1': 1, 'm2': 1, 'm3': 1 } },
+    { id: 'e2', title: 'タクシー', amount: 1200, payerId: 'm2', weights: { 'm1': 1, 'm2': 1, 'm3': 0 } }
+  ]);
+  const [history, setHistory] = useState([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  const [newMemberName, setNewMemberName] = useState('');
+  const [editingMemberId, setEditingMemberId] = useState(null);
+  const [editingNameTemp, setEditingNameTemp] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const t = translations[lang] || translations.ja;
+
+  const formatCurrency = (val) => {
+    const amount = Math.round(val).toLocaleString();
+    if (t.currencyPos === 'prefix') {
+      return `${t.currency}${amount}`;
+    }
+    return `${amount}${t.currency}`;
+  };
+
+  // Initial Load
+  useEffect(() => {
+    const savedState = decodeState(window.location.hash);
+    if (savedState) {
+      if (savedState.lang) setLang(savedState.lang);
+      if (savedState.title) setProjectTitle(savedState.title);
+      if (savedState.members) setMembers(savedState.members);
+      if (savedState.expenses) setExpenses(savedState.expenses);
+    }
+
+    const rawHistory = localStorage.getItem(STORAGE_KEY);
+    if (rawHistory) {
+      try {
+        setHistory(JSON.parse(rawHistory));
+      } catch (e) {
+        setHistory([]);
+      }
+    }
+  }, []);
+
+  // 履歴の更新
+  const updateHistory = (url) => {
+    const now = new Date().toISOString();
+    // ユーザー設定のタイトルを優先、なければデフォルト
+    const historyTitle = projectTitle.trim() || t.defaultProjectTitle;
+    
+    const newEntry = {
+      id: `${now}_${Math.random().toString(36).substr(2, 4)}`,
+      createdAt: now,
+      title: historyTitle,
+      url: url
+    };
+
+    setHistory(prev => {
+      const filtered = prev.filter(item => item.url !== url);
+      const updated = [newEntry, ...filtered].slice(0, 10);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const copyShareLink = () => {
+    const stateString = encodeState({ lang, title: projectTitle, members, expenses });
+    if (!stateString) return;
+    const url = new URL(window.location.href);
+    url.hash = `s=${stateString}`;
+    const fullUrl = url.toString();
+
+    const textField = document.createElement('textarea');
+    textField.innerText = fullUrl;
+    document.body.appendChild(textField);
+    textField.select();
+    document.execCommand('copy');
+    textField.remove();
+    
+    setCopyFeedback(true);
+    updateHistory(fullUrl);
+    setTimeout(() => setCopyFeedback(false), 2000);
+  };
+
+  const addMember = () => {
+    if (!newMemberName.trim()) return;
+    const newId = `m${Date.now()}`;
+    setMembers([...members, { id: newId, name: newMemberName }]);
+    setExpenses(expenses.map(exp => ({ ...exp, weights: { ...exp.weights, [newId]: 1 } })));
+    setNewMemberName('');
+  };
+
+  const deleteMember = (id) => {
+    if (members.length <= 1) return;
+    setMembers(members.filter(m => m.id !== id));
+    setExpenses(expenses.map(exp => {
+      const newWeights = { ...exp.weights };
+      delete newWeights[id];
+      return {
+        ...exp,
+        payerId: exp.payerId === id ? (members.find(m => m.id !== id)?.id || '') : exp.payerId,
+        weights: newWeights
+      };
+    }));
+  };
+
+  const saveEditMember = () => {
+    setMembers(members.map(m => m.id === editingMemberId ? { ...m, name: editingNameTemp } : m));
+    setEditingMemberId(null);
+  };
+
+  const addExpense = () => {
+    const newId = `e${Date.now()}`;
+    const defaultWeights = {};
+    members.forEach(m => defaultWeights[m.id] = 1);
+    setExpenses([...expenses, {
+      id: newId,
+      title: t.placeholderExpense,
+      amount: 0,
+      payerId: members[0]?.id || '',
+      weights: defaultWeights
+    }]);
+  };
+
+  const updateExpense = (id, field, value) => {
+    setExpenses(expenses.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+
+  const updateWeight = (expenseId, memberId, value) => {
+    setExpenses(expenses.map(e => e.id === expenseId ? { ...e, weights: { ...e.weights, [memberId]: parseFloat(value) || 0 } } : e));
+  };
+
+  const toggleWeight = (expenseId, memberId) => {
+    setExpenses(expenses.map(e => {
+      if (e.id !== expenseId) return e;
+      const current = e.weights[memberId];
+      return { ...e, weights: { ...e.weights, [memberId]: current === 0 ? 1 : 0 } };
+    }));
+  };
+
+  const settlement = useMemo(() => {
+    const balances = {}; 
+    members.forEach(m => balances[m.id] = 0);
+    let totalSpent = 0;
+
+    expenses.forEach(exp => {
+      const amount = parseFloat(exp.amount) || 0;
+      totalSpent += amount;
+      if (balances[exp.payerId] !== undefined) balances[exp.payerId] += amount;
+      let totalWeight = 0;
+      members.forEach(m => { totalWeight += (exp.weights[m.id] || 0); });
+
+      if (totalWeight > 0) {
+        const costPerWeight = amount / totalWeight;
+        members.forEach(m => {
+          const weight = exp.weights[m.id] || 0;
+          const share = weight * costPerWeight;
+          if (balances[m.id] !== undefined) balances[m.id] -= share;
+        });
+      }
+    });
+
+    const debtors = [];
+    const creditors = [];
+    Object.entries(balances).forEach(([id, amount]) => {
+      const rounded = Math.round(amount * 100) / 100;
+      if (rounded < -0.01) debtors.push({ id, amount: rounded });
+      if (rounded > 0.01) creditors.push({ id, amount: rounded });
+    });
+
+    debtors.sort((a, b) => a.amount - b.amount);
+    creditors.sort((a, b) => b.amount - a.amount);
+
+    const plan = [];
+    let i = 0, j = 0;
+    while (i < debtors.length && j < creditors.length) {
+      const debtor = debtors[i], creditor = creditors[j];
+      const debtAmount = Math.abs(debtor.amount), creditAmount = creditor.amount;
+      const settleAmount = Math.min(debtAmount, creditAmount);
+      plan.push({
+        from: members.find(m => m.id === debtor.id)?.name || '?',
+        to: members.find(m => m.id === creditor.id)?.name || '?',
+        amount: settleAmount
+      });
+      debtor.amount += settleAmount;
+      creditor.amount -= settleAmount;
+      if (Math.abs(debtor.amount) < 0.01) i++;
+      if (creditor.amount < 0.01) j++;
+    }
+    return { totalSpent, balances, plan };
+  }, [members, expenses]);
+
+  const deleteHistoryItem = (id, e) => {
+    e.stopPropagation();
+    setHistory(prev => {
+      const updated = prev.filter(item => item.id !== id);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 relative">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="bg-blue-600 p-2 rounded-lg">
+              <Calculator className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent hidden sm:block">
+              {t.title}
+            </h1>
+          </div>
+
+          <div className="flex-1 max-w-md mx-2 flex items-center gap-2 group">
+            <div className="text-slate-400 group-hover:text-blue-500 transition-colors">
+              <Type className="w-4 h-4" />
+            </div>
+            <input 
+              type="text"
+              placeholder={t.defaultProjectTitle}
+              value={projectTitle}
+              onChange={(e) => setProjectTitle(e.target.value)}
+              className="w-full bg-slate-100 hover:bg-slate-200/70 focus:bg-white border border-transparent focus:border-blue-300 rounded-lg px-3 py-1.5 text-sm font-semibold outline-none transition-all placeholder:text-slate-400"
+            />
+          </div>
+          
+          <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
+            <div className="hidden lg:flex text-sm font-medium text-slate-500 mr-2">
+              {t.totalSpent}: <span className="text-slate-900 font-bold ml-1">{formatCurrency(settlement.totalSpent)}</span>
+            </div>
+
+            <Button 
+              variant="secondary" 
+              size="icon" 
+              onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+              className={isHistoryOpen ? "bg-slate-100 ring-2 ring-blue-500" : ""}
+            >
+              <History className="w-4 h-4" />
+            </Button>
+
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+              <Globe className="w-4 h-4 text-slate-500 ml-1" />
+              <select 
+                value={lang} 
+                onChange={(e) => setLang(e.target.value)}
+                className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer pr-1"
+              >
+                {Object.keys(translations).map(k => (
+                  <option key={k} value={k}>{translations[k].lang}</option>
+                ))}
+              </select>
+            </div>
+            
+            <Button 
+              variant={copyFeedback ? "primary" : "secondary"} 
+              size="sm" 
+              icon={copyFeedback ? Check : Share2} 
+              onClick={copyShareLink}
+            >
+              <span className="hidden sm:inline">{copyFeedback ? t.copied : t.shareLink}</span>
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* History Drawer */}
+      {isHistoryOpen && (
+        <div className="fixed inset-0 z-40 bg-slate-900/20 backdrop-blur-sm transition-opacity" onClick={() => setIsHistoryOpen(false)}>
+          <div 
+            className="absolute top-16 right-0 w-80 max-w-full bg-white h-[calc(100vh-64px)] shadow-2xl border-l border-slate-200 p-6 overflow-y-auto animate-in slide-in-from-right duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-600" />
+                {t.history}
+              </h2>
+              <Button variant="icon" onClick={() => setIsHistoryOpen(false)}><X className="w-5 h-5" /></Button>
+            </div>
+            
+            <p className="text-xs text-slate-400 mb-4 font-medium uppercase tracking-wider">{t.recentHistory}</p>
+            
+            <div className="space-y-3">
+              {history.length === 0 ? (
+                <div className="py-12 text-center">
+                  <Clock className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">{t.noHistory}</p>
+                </div>
+              ) : (
+                history.map((item) => (
+                  <div 
+                    key={item.id} 
+                    className="group p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50/30 transition-all cursor-pointer relative shadow-sm hover:shadow"
+                    onClick={() => window.location.href = item.url}
+                  >
+                    <div className="text-sm font-bold text-slate-700 truncate pr-6">{item.title}</div>
+                    <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {new Date(item.createdAt).toLocaleString()}
+                    </div>
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => deleteHistoryItem(item.id, e)}
+                        className="p-1 text-slate-300 hover:text-red-500"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <div className="p-1 text-blue-400">
+                        <ExternalLink className="w-3 h-3" />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Project Context Summary (Visible for Shared Viewers) */}
+        {projectTitle && (
+          <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 flex items-center gap-4">
+             <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                <Type className="w-6 h-6 text-blue-500" />
+             </div>
+             <div>
+               <h2 className="text-lg font-bold text-slate-800 leading-tight">{projectTitle}</h2>
+               <p className="text-sm text-slate-500">{members.length} {t.members}</p>
+             </div>
+          </div>
+        )}
+
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Users className="w-5 h-5 text-slate-400" />
+              {t.members}
+            </h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {members.map(member => (
+              <Card key={member.id} className="p-3 flex items-center justify-between group hover:border-blue-300 transition-colors">
+                {editingMemberId === member.id ? (
+                  <div className="flex items-center gap-2 w-full">
+                    <input 
+                      autoFocus
+                      className="flex-1 bg-slate-50 border border-blue-300 rounded px-2 py-1 text-sm outline-none"
+                      value={editingNameTemp}
+                      onChange={(e) => setEditingNameTemp(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveEditMember()}
+                    />
+                    <Button variant="icon" onClick={saveEditMember}><Check className="w-4 h-4 text-green-600" /></Button>
+                    <Button variant="icon" onClick={() => setEditingMemberId(null)}><X className="w-4 h-4 text-red-500" /></Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs border border-slate-200">
+                        {member.name.slice(0, 1)}
+                      </div>
+                      <span className="font-medium text-sm truncate max-w-[100px]">{member.name}</span>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="icon" onClick={() => { setEditingMemberId(member.id); setEditingNameTemp(member.name); }}><Edit2 className="w-3 h-3" /></Button>
+                      <Button variant="icon" onClick={() => deleteMember(member.id)}><Trash2 className="w-3 h-3 text-red-400" /></Button>
+                    </div>
+                  </>
+                )}
+              </Card>
+            ))}
+            
+            <Card className="p-3 border-dashed border-2 border-slate-200 bg-transparent flex items-center gap-2 hover:border-blue-400 hover:bg-blue-50/50 transition-all">
+              <input 
+                placeholder={t.addMember} 
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                value={newMemberName}
+                onChange={(e) => setNewMemberName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addMember()}
+              />
+              <button onClick={addMember} className="w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 disabled:opacity-50" disabled={!newMemberName.trim()}>
+                <Plus className="w-4 h-4" />
+              </button>
+            </Card>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+           <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-slate-400" />
+              {t.expenses}
+            </h2>
+            <Button onClick={addExpense} icon={Plus}>{t.addExpense}</Button>
+          </div>
+
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3 w-10"></th>
+                    <th className="px-4 py-3 min-w-[180px]">{t.content}</th>
+                    <th className="px-4 py-3 w-[120px]">{t.amount}</th>
+                    <th className="px-4 py-3 w-[140px]">{t.payer}</th>
+                    {members.map(m => (
+                      <th key={m.id} className="px-2 py-3 text-center min-w-[100px] border-l border-slate-100">
+                        <div className="flex flex-col items-center">
+                          <span className="text-slate-900 font-semibold">{m.name}</span>
+                          <span className="text-[10px] uppercase tracking-wider font-normal mt-0.5 text-slate-400">{t.weight}</span>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {expenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={4 + members.length} className="px-4 py-12 text-center text-slate-400 italic bg-slate-50/30">
+                        {t.noExpenses}
+                      </td>
+                    </tr>
+                  ) : (
+                    expenses.map((expense) => (
+                      <tr key={expense.id} className="group hover:bg-slate-50 transition-colors">
+                        <td className="px-2 py-3 text-center">
+                          <button onClick={() => setExpenses(expenses.filter(e => e.id !== expense.id))} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input type="text" value={expense.title} onChange={(e) => updateExpense(expense.id, 'title', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-1 transition-colors" />
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="relative">
+                            <span className={`absolute ${t.currencyPos === 'prefix' ? 'left-2' : 'right-2'} top-1.5 text-slate-400`}>{t.currency}</span>
+                            <input 
+                              type="number" 
+                              min="0" 
+                              value={expense.amount} 
+                              onChange={(e) => updateExpense(expense.id, 'amount', e.target.value)} 
+                              className={`w-full ${t.currencyPos === 'prefix' ? 'pl-6 pr-2' : 'pl-2 pr-6'} py-1 bg-slate-50 border border-transparent rounded hover:bg-white hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:outline-none transition-all font-medium text-slate-700`} 
+                            />
+                          </div>
+                        </td>
+                        <td className="px-4 py-2">
+                          <select value={expense.payerId} onChange={(e) => updateExpense(expense.id, 'payerId', e.target.value)} className="w-full bg-transparent py-1 border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none cursor-pointer">
+                            {members.map(m => ( <option key={m.id} value={m.id}>{m.name}</option> ))}
+                          </select>
+                        </td>
+                        {members.map(m => {
+                          const weight = expense.weights[m.id] !== undefined ? expense.weights[m.id] : 0;
+                          const isActive = weight > 0;
+                          return (
+                            <td key={m.id} className={`px-2 py-2 border-l border-slate-100 text-center ${isActive ? 'bg-blue-50/20' : 'bg-slate-50/40'}`}>
+                              <div className="flex items-center justify-center gap-1">
+                                <button onClick={() => toggleWeight(expense.id, m.id)} className={`p-1 rounded-full transition-all ${isActive ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' : 'text-slate-300 hover:text-slate-400'}`}>
+                                  <Power className="w-3 h-3" />
+                                </button>
+                                <input type="number" min="0" step="0.1" value={weight} onChange={(e) => updateWeight(expense.id, m.id, e.target.value)} className={`w-12 text-center py-1 rounded text-sm outline-none border transition-colors ${isActive ? 'bg-white border-blue-200 text-slate-800 font-medium' : 'bg-transparent border-transparent text-slate-400'}`} />
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </section>
+
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <PieChart className="w-5 h-5 text-slate-400" />
+              {t.balance}
+            </h3>
+            <div className="space-y-3">
+              {members.map(m => {
+                const bal = settlement.balances[m.id] || 0;
+                return (
+                  <div key={m.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
+                    <div className="flex items-center gap-3">
+                       <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-500 font-bold text-xs border border-slate-200 shadow-sm">{m.name.slice(0, 1)}</div>
+                      <span className="font-medium text-slate-700">{m.name}</span>
+                    </div>
+                    <div className={`font-bold font-mono ${bal > 0.01 ? 'text-green-600' : bal < -0.01 ? 'text-red-500' : 'text-slate-400'}`}>
+                      {bal > 0.01 ? '+' : ''}{formatCurrency(bal)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card className="p-6 bg-gradient-to-br from-slate-800 to-slate-900 text-white border-none shadow-lg">
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-blue-400" />
+              {t.settlement}
+            </h3>
+            {settlement.plan.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center py-8">
+                <Check className="w-12 h-12 mb-2 text-green-500 opacity-50" />
+                <p>{t.settled}</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {settlement.plan.map((tx, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-white/10 p-4 rounded-lg backdrop-blur-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                      <span className="font-semibold text-red-300">{tx.from}</span>
+                      <span className="text-slate-400 text-[10px] uppercase tracking-wide">{t.payTo}</span>
+                      <span className="font-semibold text-green-300">{tx.to}</span>
+                    </div>
+                    <div className="text-xl font-bold font-mono text-white">
+                      {formatCurrency(tx.amount)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-6 text-[10px] text-slate-500 text-center">{t.optimizeNote}</div>
+          </Card>
+        </section>
+      </main>
+    </div>
+  );
+}
